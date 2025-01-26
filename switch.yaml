@@ -1,0 +1,254 @@
+#put all your ESPHome boilerplate above this line
+light:
+  # The outside of the dimmer has a very nice soft glow RGB LED all the way around it.
+  - platform: rgb
+    name: "Ring Light"
+    red: out_r
+    green: out_g
+    blue: out_b
+    effects:
+      - pulse:
+          name: "Fast Pulse"
+          transition_length: 0.5s
+          update_interval: 0.5s
+          min_brightness: 0%
+          max_brightness: 100%
+      - pulse:
+          name: "Slow Pulse"
+          transition_length: 500ms
+          update_interval: 2s
+
+  # The main light component is here
+  - platform: monochromatic
+    output: main_dimmer_output
+    name: Dimmerized Light
+    #gamma_correct: 1 #0
+    gamma_correct: 1.7
+    id: main_light
+    on_turn_on: 
+      then:
+        # When the light turns on, also turn on the relay
+        - switch.turn_on: relay
+        # And turn off the power LED since the load is on now
+        - output.turn_off: led_power
+
+    on_turn_off: 
+      then:
+        # When the light turns off, also turn off the relay
+        - switch.turn_off: relay
+        # And turn on the power LED
+        - output.turn_on: led_power
+
+output:
+  # The outputs for the RGB ring light on the front of the dimmer
+  - platform: esp8266_pwm
+    pin: 14
+    id: out_r
+  - platform: esp8266_pwm    
+    pin: 12
+    id: out_g
+  - platform: esp8266_pwm
+    pin: 4
+    id: out_b
+
+  # The main load dimmer is controlled by both a relay and a triac that switches on zero crossings.
+  # The zero crossing detector is on pin 13, and the triac is on pin 15.
+  - platform: ac_dimmer
+    id: main_dimmer
+    gate_pin: 15
+    init_with_half_cycle: true # Makes the startup work better for LED bulbs, apparently.
+    method: LEADING_PULSE_DOUBLE
+    min_power: 10%
+    max_dimmer: 0.9
+    zero_cross_pin:
+      number: 13
+      mode:
+        input: true
+        pullup: true
+      inverted: yes # seems the output actually is inverted here.
+
+  # We use a template for the main dimmer here so that the little white brightness LEDs can be set
+  # based on the actual brightness of the light internally.
+  - platform: template 
+    type: float 
+    id: main_dimmer_output
+    write_action:
+      - output.set_level:
+          id: main_dimmer
+          level: !lambda return state;
+
+      # Adjust the little dimmer LEDs based on the brightness of the light
+      - lambda: |- 
+          auto b = state;
+          if (b > 0.8) {
+            id(led_dim5).turn_on();
+          } else {
+            id(led_dim5).turn_off();
+          }
+          if (b > 0.6) {
+            id(led_dim4).turn_on();
+          } else {
+            id(led_dim4).turn_off();
+          }
+          if (b > 0.4) {
+            id(led_dim3).turn_on();
+          } else {
+            id(led_dim3).turn_off();
+          }
+          if (b > 0.2) {
+            id(led_dim2).turn_on();
+          } else {
+            id(led_dim2).turn_off();
+          }
+          if (b > 0) {
+            id(led_dim1).turn_on();
+          } else {
+            id(led_dim1).turn_off();
+          }
+
+  # These GPIO outputs are driven via the SN74HC595 shift register
+  # and control the little white LEDs on the front of the device
+  - platform: gpio
+    id: led_wifi
+    pin:
+      sn74hc595: sn74hc595_hub
+      number: 0
+  - platform: gpio
+    id: led_power
+    pin:
+      sn74hc595: sn74hc595_hub
+      number: 7
+  - platform: gpio
+    id: led_dim5
+    pin:
+      sn74hc595: sn74hc595_hub
+      number: 2
+  - platform: gpio
+    id: led_dim4
+    pin:
+      sn74hc595: sn74hc595_hub
+      number: 3
+  - platform: gpio
+    id: led_dim3
+    pin:
+      sn74hc595: sn74hc595_hub
+      number: 4
+  - platform: gpio
+    id: led_dim2
+    pin:
+      sn74hc595: sn74hc595_hub
+      number: 5
+  - platform: gpio
+    id: led_dim1
+    pin:
+      sn74hc595: sn74hc595_hub
+      number: 6    
+
+switch:
+   # This is the actual load relay control. Not setting the "name:" keeps it hidden, so we can control it with the template.
+  - platform: gpio
+    pin: 5
+    id: relay
+    restore_mode: ALWAYS_OFF
+
+binary_sensor:
+  - platform: template
+    id: button_dim_up
+    lambda: |-
+      if (id(real_dim_up).state && !id(real_dim_down).state) {
+        return true;
+      } else {
+        return false;
+      }
+    filters: # A little bit of debounce
+      - delayed_on: 10ms
+      - delayed_off: 10ms
+    on_press:
+      - while:
+          condition:
+            binary_sensor.is_on: button_dim_up
+          then:
+            - light.dim_relative:
+                id: main_light
+                relative_brightness: 5%
+                transition_length: 0.1s
+#                brightness_limits:
+#                    #max_brightness: 90%
+            - delay: 0.1s
+    on_double_click: 
+      then:
+        - light.dim_relative: 
+            id: main_light
+            relative_brightness: 100%
+            transition_length: 0s
+            
+            
+        
+
+
+  - platform: template
+    id: button_dim_down
+    lambda: |-
+      if (id(real_dim_down).state && !id(real_dim_up).state) {
+        return true;
+      } else {
+        return false;
+      }
+    filters:
+      - delayed_on: 10ms
+      - delayed_off: 10ms
+    on_press:
+      - while:
+          condition:
+            binary_sensor.is_on: button_dim_down
+          then:
+            - light.dim_relative:
+                id: main_light
+                relative_brightness: -5%
+                transition_length: 0.1s
+            - delay: 0.1s
+
+
+  - platform: template
+    id: button_power
+    lambda: |-
+      if (id(real_dim_down).state && id(real_dim_up).state) {
+        return true;
+      } else {
+        return false;
+      }
+    filters:
+      - delayed_on: 10ms
+      - delayed_off: 10ms
+    on_press:
+      then:
+        - light.toggle: main_light
+
+  # These two GPIO sensors represent the real inputs, since the UP, DOWN, and POWER buttons are on just two GPIOs
+  - platform: gpio
+    id: real_dim_up
+    pin: 
+      number: 1
+      inverted: true
+      mode:
+        input: true
+        pullup: true
+
+  - platform: gpio
+    id: real_dim_down
+    pin: 
+      number: 3
+      inverted: true
+      mode:
+        input: true
+        pullup: true
+
+
+# Set up the shift register for the front LEDs
+sn74hc595:
+  - id: 'sn74hc595_hub'
+    data_pin: 16
+    clock_pin: 0
+    latch_pin: 2
+    sr_count: 1
+
