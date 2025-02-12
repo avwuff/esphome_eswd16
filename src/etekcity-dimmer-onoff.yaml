@@ -1,0 +1,83 @@
+# Allows us to use the dimmer as an on/off only switch.
+# REMEMBER THAT THE MAX LOAD IS STILL 400W.
+
+switch:
+  # This is the actual load relay control. Not setting the "name:" keeps it hidden, so we can control it with the template.
+  - platform: gpio
+    pin: 5
+    id: relay
+    restore_mode: ALWAYS_OFF
+
+  - platform: gpio
+    pin: 15 # triac gate
+    id: triac
+    restore_mode: ALWAYS_OFF
+
+output:
+  - platform: template
+    type: binary
+    id: main_dimmer
+    write_action:
+      - lambda: |-
+          if (state == 1) {
+            id(triac).turn_on();
+          } else {
+            id(triac).turn_off();
+          }
+  - id: !remove main_dimmer_output
+  - platform: template
+    type: binary
+    id: main_dimmer_output
+    write_action:
+      - lambda: |-
+          if (state == 1) {
+            id(main_dimmer).turn_on();
+          } else {
+            id(main_dimmer).turn_off();
+          }
+
+          // Also adjust the ring light if needed
+          id(main_bright) = state;
+          id(ring_final_r).set_level(1); // state isn't used
+          id(ring_final_g).set_level(1); // state isn't used
+          id(ring_final_b).set_level(1); // state isn't used
+
+      # Adjust the little dimmer LEDs based on the brightness of the light
+      - lambda: |-
+          auto b = state;
+          if (b == 1) {
+            id(led_dim5).turn_on();
+            id(led_dim4).turn_on();
+            id(led_dim3).turn_on();
+            id(led_dim2).turn_on();
+            id(led_dim1).turn_on();
+          } else {
+            id(led_dim5).turn_off();
+            id(led_dim4).turn_off();
+            id(led_dim3).turn_off();
+            id(led_dim2).turn_off();
+            id(led_dim1).turn_off();
+          }
+
+# Disable the dimmable Main light
+light:
+  # remove the main light from the previous files
+  - id: !remove main_light
+
+  - platform: binary
+    output: main_dimmer_output
+    name: Main Light
+    id: main_light
+    on_turn_on:
+      then:
+        # When the light turns on, also turn on the relay
+        - switch.turn_on: relay
+        # And turn off the power LED since the load is on now
+        - output.turn_off: led_power
+    on_turn_off:
+      then:
+        # When the light turns off, also turn off the relay
+        - switch.turn_off: relay
+        # And turn on the power LED
+        - output.turn_on: led_power
+    # todo mqtt

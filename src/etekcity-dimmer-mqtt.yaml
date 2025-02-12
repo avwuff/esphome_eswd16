@@ -1,0 +1,79 @@
+# when this file is included, the dimmer will send and respond to MQTT messages
+# this is useful for 3-way or 4-way switches
+# to use, just set a `group_with` variable the same on all dimmers
+
+# connect to the mqtt broker, for grouping lights together
+mqtt:
+  id: mqtt_client
+  broker: !secret mqtt_host
+  username: !secret mqtt_user
+  password: !secret mqtt_pass
+  discovery: false # don't discover via HA and MQTT
+  discover_ip: false
+  topic_prefix: null # disable all MQTT topic except the ones below
+  log_topic: null # disable sending logs to MQTT
+
+  on_json_message:
+    - topic: avhome/light_groups/${group_with}/update
+      then:
+        - lambda: |-
+            // if this light is me, ignore it, to prevent loops
+            if (x["source"] == "${device_name}") {
+              return;
+            }
+
+            // to prevent loops, don't send any updates from these changes for 5 seconds.
+            id(skip_updates_start) = millis();
+
+            if (x["command"] == "off") {
+              id(main_light).turn_off().perform();
+              return;
+            } 
+
+            // must be an on or a brightness command
+            auto call = id(main_light).turn_on();
+            call.set_brightness((float)x["bright"]); 
+            call.perform();
+
+# scripts used by the mqtt sender
+# replace the dummy scripts in the main file with the ones that actually do something
+script:
+  - id: !remove mqtt_send_on
+  - id: mqtt_send_on
+    then:
+      - lambda: |-
+          if (millis() > id(skip_updates_start) && millis() < id(skip_updates_start) + 5000) return;
+          id(mqtt_client).publish_json("avhome/light_groups/${group_with}/update", [=](JsonObject root) {
+            root["command"] = "on";
+            root["source"] = "${device_name}";
+            root["bright"] = id(main_light).current_values.get_brightness();
+          });
+  - id: !remove mqtt_send_on_remote
+  - id: mqtt_send_on_remote
+    then:
+      - lambda: |-
+          if (millis() > id(skip_updates_start) && millis() < id(skip_updates_start) + 5000) return;
+          id(mqtt_client).publish_json("avhome/light_groups/${group_with}/update", [=](JsonObject root) {
+            root["command"] = "on";
+            root["source"] = "${device_name}";
+            root["bright"] = id(main_light).remote_values.get_brightness();
+          });
+  - id: !remove mqtt_send_off
+  - id: mqtt_send_off
+    then:
+      - lambda: |-
+          if (millis() > id(skip_updates_start) && millis() < id(skip_updates_start) + 5000) return;
+          id(mqtt_client).publish_json("avhome/light_groups/${group_with}/update", [=](JsonObject root) {
+            root["command"] = "off";
+            root["source"] = "${device_name}";
+          });
+  - id: !remove mqtt_send_state
+  - id: mqtt_send_state
+    then:
+      - lambda: |-
+          if (millis() > id(skip_updates_start) && millis() < id(skip_updates_start) + 5000) return;
+          id(mqtt_client).publish_json("avhome/light_groups/${group_with}/update", [=](JsonObject root) {
+            root["command"] = "state";
+            root["source"] = "${device_name}";
+            root["bright"] = id(main_light).remote_values.get_brightness();
+          });

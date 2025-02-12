@@ -1,0 +1,534 @@
+# base items common to both real and slave dimmers
+esphome:
+  name: ${device_name}
+  friendly_name: ${friendly_name}
+
+preferences:
+  flash_write_interval: 5min # wait 5 min after change before writing to flash
+
+esp8266:
+  board: esp01_1m
+  # These are needed so that the state is restored on power outage
+  restore_from_flash: true
+
+# Enable logging
+logger:
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: ${encryption_key}
+
+ota:
+  - platform: esphome
+    password: ${ota}
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: ${device_name}
+    password: "8XoQMirinKAV"
+
+# scripts used by the mqtt sender
+# these are dummy scripts and will be replaced with real ones if you include -mqtt.yaml
+script:
+  - id: mqtt_send_on
+    then:
+      - lambda: |-
+          return;
+  - id: mqtt_send_on_remote
+    then:
+      - lambda: |-
+          return;
+  - id: mqtt_send_off
+    then:
+      - lambda: |-
+          return;
+  - id: mqtt_send_state
+    then:
+      - lambda: |-
+          return;
+
+captive_portal:
+
+light:
+  # The outside of the dimmer has a very nice soft glow RGB LED all the way around it.
+  - platform: rgb
+    name: Ring Light
+    red: ring_main_r
+    green: ring_main_g
+    blue: ring_main_b
+    restore_mode: RESTORE_DEFAULT_OFF
+
+  - platform: rgb
+    name: Ring Light when On
+    red: ring_mainon_r
+    green: ring_mainon_g
+    blue: ring_mainon_b
+    restore_mode: RESTORE_DEFAULT_OFF
+    id: ring_on
+
+  - platform: rgb
+    name: Ring Light Override
+    red: ring_override_r
+    green: ring_override_g
+    blue: ring_override_b
+    id: ring_override
+    effects:
+      - pulse:
+          name: "Fast Pulse"
+          transition_length: 0.5s
+          update_interval: 0.5s
+          min_brightness: 0%
+          max_brightness: 100%
+      - pulse:
+          name: "Slow Pulse"
+          transition_length: 500ms
+          update_interval: 2s
+      - flicker:
+          name: Flicker
+          alpha: 95%
+          intensity: 1.5%
+      - lambda:
+          name: Rainbow
+          update_interval: 1s
+          lambda: |-
+            static int state = 0;
+            auto call = id(ring_override).turn_on();
+            call.set_transition_length(1000);
+            if (state == 0) {
+              call.set_rgb(1.0, 0.0, 0.0);
+            } else if (state == 1) {
+              call.set_rgb(1.0, 1.0, 0.0);
+            } else if (state == 2) {
+              call.set_rgb(0.0, 1.0, 0.0);
+            } else if (state == 3) {
+              call.set_rgb(0.0, 1.0, 1.0);
+            } else if (state == 4) {
+              call.set_rgb(0.0, 0.0, 1.0);
+            } else if (state == 5) {
+              call.set_rgb(1.0, 0.0, 1.0);
+            }
+            call.perform();
+            state++;
+            if (state == 6)
+              state = 0;
+
+  # The main light component is here
+  - platform: monochromatic
+    output: main_dimmer_output
+    name: Main Light
+    #gamma_correct: 1 #0
+    gamma_correct: 1.7
+    id: main_light
+    on_turn_on:
+      then:
+        # When the light turns on, also turn on the relay
+        - switch.turn_on: relay
+        # And turn off the power LED since the load is on now
+        - output.turn_off: led_power
+        # update the mqtt that we are doing stuff
+        - script.execute:
+            id: mqtt_send_on
+    on_turn_off:
+      then:
+        # When the light turns off, also turn off the relay
+        - switch.turn_off: relay
+        # And turn on the power LED
+        - output.turn_on: led_power
+        - script.execute:
+            id: mqtt_send_off
+    on_state:
+      - script.execute:
+          id: mqtt_send_state
+
+globals:
+  - id: ring_m_r
+    type: float
+  - id: ring_m_g
+    type: float
+  - id: ring_m_b
+    type: float
+  - id: ring_mo_r
+    type: float
+  - id: ring_mo_g
+    type: float
+  - id: ring_mo_b
+    type: float
+  - id: ring_o_r
+    type: float
+  - id: ring_o_g
+    type: float
+  - id: ring_o_b
+    type: float
+  - id: main_bright
+    type: float # main lamp brightness
+  - id: skip_updates_start # don't send updates until this time has passed
+    type: int
+output:
+  # The outputs for the RGB ring light on the front of the dimmer
+  - platform: esp8266_pwm
+    pin: 14
+    id: out_r
+  - platform: esp8266_pwm
+    pin: 12
+    id: out_g
+  - platform: esp8266_pwm
+    pin: 4
+    id: out_b
+
+    # ring light main
+    # only write to this light if the override light is NOT on
+  - platform: template
+    type: float
+    id: ring_main_r
+    write_action:
+      - lambda: |-
+          id(ring_m_r) = state;
+          id(ring_final_r).set_level(state);
+  - platform: template
+    type: float
+    id: ring_main_g
+    write_action:
+      - lambda: |-
+          id(ring_m_g) = state;
+          id(ring_final_g).set_level(state);
+  - platform: template
+    type: float
+    id: ring_main_b
+    write_action:
+      - lambda: |-
+          id(ring_m_b) = state;
+          id(ring_final_b).set_level(state);
+
+  # ring light on -- takes over when the actual main light is on
+  - platform: template
+    type: float
+    id: ring_mainon_r
+    write_action:
+      - lambda: |-
+          id(ring_mo_r) = state;
+          id(ring_final_r).set_level(state);
+  - platform: template
+    type: float
+    id: ring_mainon_g
+    write_action:
+      - lambda: |-
+          id(ring_mo_g) = state;
+          id(ring_final_g).set_level(state);
+  - platform: template
+    type: float
+    id: ring_mainon_b
+    write_action:
+      - lambda: |-
+          id(ring_mo_b) = state;
+          id(ring_final_b).set_level(state);
+
+  - platform: template
+    type: float
+    id: ring_override_r
+    write_action:
+      - lambda: |-
+          id(ring_o_r) = state;
+          id(ring_final_r).set_level(state);
+  - platform: template
+    type: float
+    id: ring_override_g
+    write_action:
+      - lambda: |-
+          id(ring_o_g) = state;
+          id(ring_final_g).set_level(state);
+  - platform: template
+    type: float
+    id: ring_override_b
+    write_action:
+      - lambda: |-
+          id(ring_o_b) = state;
+          id(ring_final_b).set_level(state);
+
+  # combiner outputs, these control the actual light
+  - platform: template
+    type: float
+    id: ring_final_r
+    write_action:
+      - if:
+          condition:
+            light.is_on: ring_override
+          then:
+            - lambda: |-
+                id(out_r).set_level(id(ring_o_r));
+          else:
+            - if:
+                condition:
+                  all:
+                    - light.is_on: main_light
+                    - light.is_on: ring_on
+                then:
+                  - lambda: |-
+                      // calculate a smooth gradient between the ON and OFF colors
+                      auto b = id(main_bright);
+                      id(out_r).set_level((id(ring_mo_r) * b) + (id(ring_m_r) * (1-b)));
+                else:
+                  - lambda: |-
+                      id(out_r).set_level(id(ring_m_r));
+  - platform: template
+    type: float
+    id: ring_final_g
+    write_action:
+      - if:
+          condition:
+            light.is_on: ring_override
+          then:
+            - lambda: |-
+                id(out_g).set_level(id(ring_o_g));
+          else:
+            - if:
+                condition:
+                  all:
+                    - light.is_on: main_light
+                    - light.is_on: ring_on
+                then:
+                  - lambda: |-
+                      auto b = id(main_bright);
+                      id(out_g).set_level((id(ring_mo_g) * b) + (id(ring_m_g) * (1-b)));
+                else:
+                  - lambda: |-
+                      id(out_g).set_level(id(ring_m_g));
+  - platform: template
+    type: float
+    id: ring_final_b
+    write_action:
+      - if:
+          condition:
+            light.is_on: ring_override
+          then:
+            - lambda: |-
+                id(out_b).set_level(id(ring_o_b));
+          else:
+            - if:
+                condition:
+                  all:
+                    - light.is_on: main_light
+                    - light.is_on: ring_on
+                then:
+                  - lambda: |-
+                      auto b = id(main_bright);
+                      id(out_b).set_level((id(ring_mo_b) * b) + (id(ring_m_b) * (1-b)));
+                else:
+                  - lambda: |-
+                      id(out_b).set_level(id(ring_m_b));
+
+  # We use a template for the main dimmer here so that the little white brightness LEDs can be set
+  # based on the actual brightness of the light internally.
+  - platform: template
+    type: float
+    id: main_dimmer_output
+    write_action:
+      - lambda: |-
+          id(main_bright) = state;
+          id(main_dimmer).set_level(state);
+
+          // Also adjust the ring light if needed
+          id(ring_final_r).set_level(1); // state isn't used
+          id(ring_final_g).set_level(1); // state isn't used
+          id(ring_final_b).set_level(1); // state isn't used
+
+      # Adjust the little dimmer LEDs based on the brightness of the light
+      - lambda: |-
+          auto b = state;
+          if (b > 0.8) {
+            id(led_dim5).turn_on();
+          } else {
+            id(led_dim5).turn_off();
+          }
+          if (b > 0.6) {
+            id(led_dim4).turn_on();
+          } else {
+            id(led_dim4).turn_off();
+          }
+          if (b > 0.4) {
+            id(led_dim3).turn_on();
+          } else {
+            id(led_dim3).turn_off();
+          }
+          if (b > 0.2) {
+            id(led_dim2).turn_on();
+          } else {
+            id(led_dim2).turn_off();
+          }
+          if (b > 0) {
+            id(led_dim1).turn_on();
+          } else {
+            id(led_dim1).turn_off();
+          }
+
+  # These GPIO outputs are driven via the SN74HC595 shift register
+  # and control the little white LEDs on the front of the device
+  #  - platform: gpio
+  #    id: led_wifi-  - controlled by STATUS_LED section below
+  #    pin:
+  #      sn74hc595: sn74hc595_hub
+  #      number: 0
+  - platform: gpio
+    id: led_power
+    pin:
+      sn74hc595: sn74hc595_hub
+      number: 7
+  - platform: gpio
+    id: led_dim5
+    pin:
+      sn74hc595: sn74hc595_hub
+      number: 2
+  - platform: gpio
+    id: led_dim4
+    pin:
+      sn74hc595: sn74hc595_hub
+      number: 3
+  - platform: gpio
+    id: led_dim3
+    pin:
+      sn74hc595: sn74hc595_hub
+      number: 4
+  - platform: gpio
+    id: led_dim2
+    pin:
+      sn74hc595: sn74hc595_hub
+      number: 5
+  - platform: gpio
+    id: led_dim1
+    pin:
+      sn74hc595: sn74hc595_hub
+      number: 6
+
+binary_sensor:
+  - platform: template
+    id: button_dim_up
+    lambda: |-
+      if (id(real_dim_up).state && !id(real_dim_down).state) {
+        return true;
+      } else {
+        return false;
+      }
+    filters: # A little bit of debounce
+      - delayed_on: 10ms
+      - delayed_off: 10ms
+    on_press:
+      - while:
+          condition:
+            binary_sensor.is_on: button_dim_up
+          then:
+            - if:
+                condition: # if the light is off, pressing the up button just turns it on the last dim
+                  - light.is_off: main_light
+                then:
+                  - light.turn_on:
+                      id: main_light
+                else:
+                  - light.dim_relative:
+                      id: main_light
+                      relative_brightness: 5%
+                      transition_length: 0.1s
+                  - script.execute:
+                      id: mqtt_send_on_remote
+            - delay: 0.1s
+    on_double_click:
+      then:
+        - light.dim_relative:
+            id: main_light
+            relative_brightness: 100%
+            transition_length: 0s
+        - script.execute:
+            id: mqtt_send_on_remote
+
+  - platform: template
+    id: button_dim_down
+    lambda: |-
+      if (id(real_dim_down).state && !id(real_dim_up).state) {
+        return true;
+      } else {
+        return false;
+      }
+    filters:
+      - delayed_on: 10ms
+      - delayed_off: 10ms
+    on_press:
+      - while:
+          condition:
+            binary_sensor.is_on: button_dim_down
+          then:
+            - if:
+                condition: # if the light is off, pressing the down button just turns it on the last dim
+                  - light.is_off: main_light
+                then:
+                  - light.turn_on:
+                      id: main_light
+                else:
+                  - light.dim_relative:
+                      id: main_light
+                      relative_brightness: -5%
+                      transition_length: 0.1s
+                  - script.execute:
+                      id: mqtt_send_on_remote
+
+            - delay: 0.1s
+
+  - platform: template
+    id: button_power
+    lambda: |-
+      if (id(real_dim_down).state && id(real_dim_up).state) {
+        return true;
+      } else {
+        return false;
+      }
+    filters:
+      - delayed_on: 10ms
+      - delayed_off: 10ms
+    on_press:
+      then:
+        - if:
+            condition: # if the light is off, pressing the down button just turns it on the last dim
+              - light.is_off: main_light
+            then:
+              - light.turn_on:
+                  id: main_light
+            else:
+              - light.turn_off:
+                  id: main_light
+              - script.execute:
+                  id: mqtt_send_off
+
+  # These two GPIO sensors represent the real inputs, since the UP, DOWN, and POWER buttons are on just two GPIOs
+  - platform: gpio
+    id: real_dim_up
+    pin:
+      number: 1
+      inverted: true
+      mode:
+        input: true
+        pullup: true
+
+  - platform: gpio
+    id: real_dim_down
+    pin:
+      number: 3
+      inverted: true
+      mode:
+        input: true
+        pullup: true
+
+# Set up the shift register for the front LEDs
+sn74hc595:
+  - id: "sn74hc595_hub"
+    data_pin: 16
+    clock_pin: 0
+    latch_pin: 2
+    sr_count: 1
+
+# This status component makes the wifi led blink based on the connection status
+status_led:
+  pin:
+    sn74hc595: sn74hc595_hub
+    number: 0 # wifi led connection

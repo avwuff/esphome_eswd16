@@ -1,0 +1,15 @@
+# Slave dimmer doesn't control the relay or the triac but is otherwise the same
+
+switch:
+  # Since the Slave switch doesn't control anything, create a dummy relay that does nothing
+  - platform: template
+    id: relay
+    restore_mode: ALWAYS_OFF
+    turn_on_action: {}
+
+output:
+  # Slave switches doesn't do anything so just create a dummy dimmer
+  - platform: template
+    id: main_dimmer
+    type: float
+    write_action: {}

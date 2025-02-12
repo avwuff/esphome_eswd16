@@ -1,0 +1,26 @@
+# items specific to the real dimmer, as much as I can anyway
+
+switch:
+  # This is the actual load relay control. Not setting the "name:" keeps it hidden, so we can control it with the template.
+  - platform: gpio
+    pin: 5
+    id: relay
+    restore_mode: ALWAYS_OFF
+
+output:
+  # The main load dimmer is controlled by both a relay and a triac that switches on zero crossings.
+  # The zero crossing detector is on pin 13, and the triac is on pin 15.
+  - platform: ac_dimmer
+    id: main_dimmer
+    gate_pin: 15
+    # disabled -- seems to make the lights flicker on turn on
+    #init_with_half_cycle: true # Makes the startup work better for LED bulbs, apparently.
+    method: LEADING_PULSE_DOUBLE
+    min_power: 10%
+    max_dimmer: 0.9
+    zero_cross_pin:
+      number: 13
+      mode:
+        input: true
+        pullup: true
+      inverted: yes # seems the output actually is inverted here.
