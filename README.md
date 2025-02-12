@@ -7,6 +7,18 @@ Using the Etekcity ESWD16 dimmer with ESPHome
 ⚠ May require this change to ESPHome:
 https://github.com/esphome/esphome/pull/8144
 
+## Technical Information
+The Etekcity ESWD16 dimmer is a nice looking dimmer with the following hardware:
+- Three front panel buttons
+- Seven front LEDs
+- Full RGB diffuse ring light
+- 400W triac-based dimmer
+- Relay to turn off the load to prevent leakage
+- ESP01_1M 8266-based microprocessor
+
+Dimming is performed via a zero-crossing detector and a gated triac.  
+Using the `ac_dimmer` component, the ESP is able to "chop up" the AC waveform as it passes through.
+
 ## Installation
 
 1. Copy the 5 files in the `/src/` directory into the `/esphome/include` directory on your HA installation. 
