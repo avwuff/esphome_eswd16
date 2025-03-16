@@ -7,6 +7,9 @@ Using the Etekcity ESWD16 dimmer with ESPHome
 ⚠ May require this change to ESPHome:
 https://github.com/esphome/esphome/pull/8144
 
+## Alternative front plate design
+See https://www.printables.com/model/1226445-etekcity-eswd16-replacement-front-plate
+
 ## Technical Information
 The Etekcity ESWD16 dimmer is a nice looking dimmer with the following hardware:
 - Three front panel buttons
